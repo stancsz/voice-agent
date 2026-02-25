@@ -1,8 +1,4 @@
-pipecat-ai[openai]
+pipecat-ai[openai,silero]
 playwright
 pyaudio
 python-dotenv
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
