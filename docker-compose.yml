@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MEETING_URL=${MEETING_URL}
+    shm_size: '4gb'
+    volumes:
+      - .:/app
+    network_mode: host
