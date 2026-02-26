@@ -1,7 +1,10 @@
-FROM python:3.10-slim-bookworm
+# syntax=docker/dockerfile:1.5
+FROM python:3.11-slim-bookworm
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     pulseaudio \
     socat \
     alsa-utils \
@@ -17,11 +20,14 @@ WORKDIR /app
 RUN useradd -m -u 1000 botuser
 
 # Install uv
-RUN pip install uv
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install uv
 
 # Install Python dependencies
 COPY requirements.lock .
-RUN uv pip install --system --no-cache -r requirements.lock
+ENV UV_CACHE_DIR=/root/.cache/uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements.lock
 
 # Install Playwright browsers
 RUN playwright install chromium
