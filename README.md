@@ -20,6 +20,8 @@ The bot is configured via environment variables. You can set these in `docker-co
 
 - `OPENAI_API_KEY`: Your OpenAI API key.
 - `MEETING_URL`: The full URL of the Google Meet meeting (e.g., `https://meet.google.com/abc-defg-hij`).
+- `AGENT_NAME`: The name the bot will use when joining the meeting (default: "AI Assistant").
+- `AGENT_IMAGE`: Path to an image file for the profile picture (Note: Guest join typically does not support setting a profile picture).
 
 ## Usage
 
@@ -35,6 +37,7 @@ The bot is configured via environment variables. You can set these in `docker-co
    ```bash
    export OPENAI_API_KEY="sk-..."
    export MEETING_URL="https://meet.google.com/..."
+   export AGENT_NAME="My AI Bot"
    ```
 
 3. **Build and Run with Docker Compose:**

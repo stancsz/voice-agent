@@ -18,6 +18,8 @@ load_dotenv()
 
 MEETING_URL = os.getenv("MEETING_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+AGENT_NAME = os.getenv("AGENT_NAME", "AI Assistant")
+AGENT_IMAGE = os.getenv("AGENT_IMAGE")
 
 if not MEETING_URL:
     print("Warning: MEETING_URL is not set.")
@@ -86,25 +88,48 @@ async def join_meeting(playwright, url):
         try:
             name_input = page.get_by_placeholder("Your name")
             if await name_input.is_visible(timeout=5000):
-                 await name_input.fill("AI Assistant")
+                 await name_input.fill(AGENT_NAME)
         except:
             pass
 
+        if AGENT_IMAGE:
+             print(f"Note: AGENT_IMAGE is set to {AGENT_IMAGE}, but guest join typically doesn't support setting a profile picture.")
+
         # Click join button
         join_clicked = False
-        for text in ["Ask to join", "Join now", "Join"]:
-            try:
-                btn = page.get_by_role("button", name=text)
-                if await btn.is_visible():
-                    print(f"Clicking join button: {await btn.inner_text()}")
-                    await btn.click()
-                    join_clicked = True
-                    break
-            except:
-                continue
+        # Wait for any of the join buttons to appear
+        try:
+            # We look for any of these buttons. We'll wait up to 10 seconds.
+            # Using a locator that matches any of the text options.
+            join_btn_locator = page.get_by_role("button", name="Ask to join").or_(
+                page.get_by_role("button", name="Join now")
+            ).or_(
+                page.get_by_role("button", name="Join")
+            )
+
+            await join_btn_locator.first.wait_for(state="visible", timeout=10000)
+
+            # Click the one that is visible
+            if await page.get_by_role("button", name="Ask to join").is_visible():
+                print("Clicking 'Ask to join'...")
+                await page.get_by_role("button", name="Ask to join").click()
+                join_clicked = True
+            elif await page.get_by_role("button", name="Join now").is_visible():
+                print("Clicking 'Join now'...")
+                await page.get_by_role("button", name="Join now").click()
+                join_clicked = True
+            elif await page.get_by_role("button", name="Join").is_visible():
+                print("Clicking 'Join'...")
+                await page.get_by_role("button", name="Join").click()
+                join_clicked = True
+
+        except Exception as e:
+            print(f"Timeout waiting for join button: {e}")
 
         if not join_clicked:
-             print("Could not find join button. Waiting...")
+             print("Could not find or click join button. Aborting.")
+             await browser.close()
+             return None, None
 
         return browser, page
 
@@ -123,12 +148,9 @@ async def main():
 
     if browser_input_index is None:
         print("Warning: BrowserOutput.monitor not found. Using default input device.")
-        # Typically index 0 or generic default
-        # browser_input_index = 0 # Fallback
 
     if bot_output_index is None:
         print("Warning: BotOutput not found. Using default output device.")
-        # bot_output_index = 0 # Fallback
 
     transport = LocalAudioTransport(
         LocalAudioTransportParams(
@@ -153,7 +175,7 @@ async def main():
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful AI assistant in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
+            "content": f"You are a helpful AI assistant named {AGENT_NAME} in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
         }
     ]
 
