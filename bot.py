@@ -9,9 +9,15 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.frames.frames import LLMMessagesFrame, EndFrame
-from pipecat.services.openai import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.events import (
+    SessionProperties,
+    AudioConfiguration,
+    AudioInput,
+    TurnDetection
+)
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -20,6 +26,14 @@ MEETING_URL = os.getenv("MEETING_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AGENT_NAME = os.getenv("AGENT_NAME", "AI Assistant")
 AGENT_IMAGE = os.getenv("AGENT_IMAGE")
+
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
+if not SYSTEM_PROMPT:
+    SYSTEM_PROMPT = f"You are a helpful AI assistant named {AGENT_NAME} in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
+
+VOICE_DETECTION_THRESHOLD = float(os.getenv("VOICE_DETECTION_THRESHOLD", "0.5"))
+VOICE_DETECTION_SILENCE_DURATION_MS = int(os.getenv("VOICE_DETECTION_SILENCE_DURATION_MS", "500"))
+VOICE_DETECTION_PREFIX_PADDING_MS = int(os.getenv("VOICE_DETECTION_PREFIX_PADDING_MS", "300"))
 
 if not MEETING_URL:
     print("Warning: MEETING_URL is not set.")
@@ -167,17 +181,24 @@ async def main():
     )
 
     # 2. Setup LLM Service
-    llm = OpenAIRealtimeLLMService(
-        api_key=OPENAI_API_KEY,
-        start_audio_paused=False
+    session_properties = SessionProperties(
+        instructions=SYSTEM_PROMPT,
+        audio=AudioConfiguration(
+            input=AudioInput(
+                turn_detection=TurnDetection(
+                    threshold=VOICE_DETECTION_THRESHOLD,
+                    prefix_padding_ms=VOICE_DETECTION_PREFIX_PADDING_MS,
+                    silence_duration_ms=VOICE_DETECTION_SILENCE_DURATION_MS
+                )
+            )
+        )
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": f"You are a helpful AI assistant named {AGENT_NAME} in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
-        }
-    ]
+    llm = OpenAIRealtimeLLMService(
+        api_key=OPENAI_API_KEY,
+        start_audio_paused=False,
+        session_properties=session_properties
+    )
 
     # 3. Setup Pipeline
     # Input -> LLM -> Output
