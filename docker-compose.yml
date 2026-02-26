@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MEETING_URL=${MEETING_URL}
+      - AGENT_NAME=${AGENT_NAME:-AI Assistant}
+      - AGENT_IMAGE=${AGENT_IMAGE}
+    shm_size: '4gb'
+    volumes:
+      - .:/app
+    network_mode: host
