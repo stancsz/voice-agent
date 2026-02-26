@@ -11,7 +11,8 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.frames.frames import LLMMessagesFrame, EndFrame
 from pipecat.services.openai import OpenAIRealtimeLLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
-from pipecat.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 
 # Load environment variables
 load_dotenv()
@@ -20,6 +21,15 @@ MEETING_URL = os.getenv("MEETING_URL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AGENT_NAME = os.getenv("AGENT_NAME", "AI Assistant")
 AGENT_IMAGE = os.getenv("AGENT_IMAGE")
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
+
+# Voice Activity Detection (VAD) parameters
+VAD_START_SECS = float(os.getenv("VAD_START_SECS", "0.2"))
+VAD_STOP_SECS = float(os.getenv("VAD_STOP_SECS", "0.2"))
+VAD_CONFIDENCE = float(os.getenv("VAD_CONFIDENCE", "0.7"))
+
+# Pipeline configuration
+ALLOW_INTERRUPTIONS = os.getenv("ALLOW_INTERRUPTIONS", "true").lower() == "true"
 
 if not MEETING_URL:
     print("Warning: MEETING_URL is not set.")
@@ -158,7 +168,13 @@ async def main():
             audio_in_enabled=True,
             camera_out_enabled=False,
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(
+                params=VADParams(
+                    start_secs=VAD_START_SECS,
+                    stop_secs=VAD_STOP_SECS,
+                    confidence=VAD_CONFIDENCE
+                )
+            ),
             vad_audio_passthrough=True,
             # If indices are None, PyAudio uses default
             audio_in_index=browser_input_index,
@@ -173,12 +189,20 @@ async def main():
         start_audio_paused=False
     )
 
-    messages = [
-        {
-            "role": "system",
-            "content": f"You are a helpful AI assistant named {AGENT_NAME} in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
-        }
-    ]
+    if SYSTEM_PROMPT:
+        messages = [
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            }
+        ]
+    else:
+        messages = [
+            {
+                "role": "system",
+                "content": f"You are a helpful AI assistant named {AGENT_NAME} in a Google Meet meeting. Listen to the conversation and participate when addressed or when you have relevant information. Keep your responses concise."
+            }
+        ]
 
     # 3. Setup Pipeline
     # Input -> LLM -> Output
@@ -193,7 +217,7 @@ async def main():
     task = PipelineTask(
         pipeline,
         params=PipelineTask.Params(
-            allow_interruptions=True,
+            allow_interruptions=ALLOW_INTERRUPTIONS,
             enable_metrics=True
         )
     )
