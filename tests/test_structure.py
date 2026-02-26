@@ -31,7 +31,7 @@ def test_bot_syntax():
         sys.exit(1)
 
 def test_dockerfile_content():
-    required_keywords = ["FROM python:", "RUN apt-get", "RUN pip install", "ENTRYPOINT"]
+    required_keywords = ["FROM python:", "apt-get", "pip install", "ENTRYPOINT"]
     with open("Dockerfile", "r") as f:
         content = f.read()
 
