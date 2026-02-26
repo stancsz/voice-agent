@@ -210,6 +210,7 @@ async def main():
         print("Starting voice agent...")
 
         try:
+            await task.queue_frame(LLMMessagesFrame(messages))
             await runner.run(task)
         except KeyboardInterrupt:
             print("Exiting...")
