@@ -169,6 +169,7 @@ async def main():
     # 2. Setup LLM Service
     llm = OpenAIRealtimeLLMService(
         api_key=OPENAI_API_KEY,
+        model="gpt-realtime-mini",
         start_audio_paused=False
     )
 
