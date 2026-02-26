@@ -16,9 +16,12 @@ WORKDIR /app
 # Create a non-root user
 RUN useradd -m -u 1000 botuser
 
+# Install uv
+RUN pip install uv
+
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock .
+RUN uv pip install --system --no-cache -r requirements.lock
 
 # Install Playwright browsers
 RUN playwright install chromium
