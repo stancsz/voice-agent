@@ -8,6 +8,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     pulseaudio \
     socat \
     alsa-utils \
+    chromium \
     libasound2-dev \
     portaudio19-dev \
     build-essential \
@@ -19,6 +20,9 @@ WORKDIR /app
 # Create a non-root user
 RUN useradd -m -u 1000 botuser
 
+# Unbuffered logs for easier debugging
+ENV PYTHONUNBUFFERED=1
+
 # Install uv
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install uv
@@ -29,9 +33,9 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.lock
 
-# Install Playwright browsers
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Skip Playwright browser downloads and use system Chromium
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy application code
 COPY bot.py .

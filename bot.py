@@ -1,15 +1,16 @@
 import os
 import sys
 import asyncio
+import re
 import pyaudio
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.frames.frames import LLMMessagesFrame, EndFrame
-from pipecat.services.openai import OpenAIRealtimeLLMService
+from pipecat.pipeline.task import PipelineTask, PipelineParams
+from pipecat.frames.frames import LLMMessagesUpdateFrame, EndFrame
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -22,6 +23,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 AGENT_NAME = os.getenv("AGENT_NAME", "AI Assistant")
 AGENT_IMAGE = os.getenv("AGENT_IMAGE")
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT")
+ANNOUNCE_ON_JOIN = os.getenv("ANNOUNCE_ON_JOIN", "false").lower() == "true"
 
 # Voice Activity Detection (VAD) parameters
 VAD_START_SECS = float(os.getenv("VAD_START_SECS", "0.2"))
@@ -66,7 +68,17 @@ def find_audio_devices():
 async def join_meeting(playwright, url):
     """Joins a Google Meet meeting."""
     print(f"Joining meeting: {url}")
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+    chromium_executable = os.getenv("CHROMIUM_EXECUTABLE_PATH")
     browser = await playwright.chromium.launch(
+        executable_path=chromium_executable,
+        env={
+            **os.environ,
+            # Route Chrome audio to the virtual devices for the meeting
+            "PULSE_SINK": "BrowserOutput",
+            "PULSE_SOURCE": "BotOutput.monitor",
+        },
         args=[
             "--use-fake-ui-for-media-stream",
             "--headless=new",
@@ -85,6 +97,7 @@ async def join_meeting(playwright, url):
 
     try:
         await page.goto(url)
+        await page.wait_for_load_state("domcontentloaded")
 
         # Handle "Got it" popup
         try:
@@ -105,38 +118,62 @@ async def join_meeting(playwright, url):
         if AGENT_IMAGE:
              print(f"Note: AGENT_IMAGE is set to {AGENT_IMAGE}, but guest join typically doesn't support setting a profile picture.")
 
-        # Click join button
+        # Click join button (poll and wait for host admit flow)
         join_clicked = False
-        # Wait for any of the join buttons to appear
         try:
-            # We look for any of these buttons. We'll wait up to 10 seconds.
-            # Using a locator that matches any of the text options.
-            join_btn_locator = page.get_by_role("button", name="Ask to join").or_(
-                page.get_by_role("button", name="Join now")
-            ).or_(
-                page.get_by_role("button", name="Join")
-            )
+            join_regex = re.compile(r"(ask to join|join now|join meeting|join|request to join)", re.IGNORECASE)
+            poll_deadline_secs = float(os.getenv("JOIN_WAIT_SECS", "180"))
+            poll_interval_secs = float(os.getenv("JOIN_POLL_INTERVAL_SECS", "2"))
+            start_time = asyncio.get_event_loop().time()
 
-            await join_btn_locator.first.wait_for(state="visible", timeout=10000)
+            while (asyncio.get_event_loop().time() - start_time) < poll_deadline_secs:
+                buttons = page.get_by_role("button")
+                try:
+                    await buttons.first.wait_for(state="attached", timeout=5000)
+                except Exception:
+                    await asyncio.sleep(poll_interval_secs)
+                    continue
 
-            # Click the one that is visible
-            if await page.get_by_role("button", name="Ask to join").is_visible():
-                print("Clicking 'Ask to join'...")
-                await page.get_by_role("button", name="Ask to join").click()
-                join_clicked = True
-            elif await page.get_by_role("button", name="Join now").is_visible():
-                print("Clicking 'Join now'...")
-                await page.get_by_role("button", name="Join now").click()
-                join_clicked = True
-            elif await page.get_by_role("button", name="Join").is_visible():
-                print("Clicking 'Join'...")
-                await page.get_by_role("button", name="Join").click()
-                join_clicked = True
+                count = await buttons.count()
+                for i in range(count):
+                    btn = buttons.nth(i)
+                    try:
+                        if not await btn.is_visible():
+                            continue
+                        name = await btn.text_content() or ""
+                        if join_regex.search(name):
+                            print(f"Clicking join button: {name.strip()!r}...")
+                            await btn.click()
+                            join_clicked = True
+                            break
+                    except Exception:
+                        continue
+
+                if join_clicked:
+                    break
+
+                await asyncio.sleep(poll_interval_secs)
 
         except Exception as e:
-            print(f"Timeout waiting for join button: {e}")
+            print(f"Error while waiting for join button: {e}")
 
         if not join_clicked:
+             # Dump visible button text to aid debugging
+             try:
+                 print("Current page URL:", page.url)
+                 print("Page title:", await page.title())
+                 buttons = page.get_by_role("button")
+                 count = await buttons.count()
+                 texts = []
+                 for i in range(count):
+                     btn = buttons.nth(i)
+                     if await btn.is_visible():
+                         texts.append((await btn.text_content() or "").strip())
+                 print("Visible buttons:", [t for t in texts if t])
+                 await page.screenshot(path="/app/meet_join_failure.png", full_page=True)
+                 print("Saved failure screenshot to /app/meet_join_failure.png")
+             except Exception as e:
+                 print(f"Failed to capture debug info: {e}")
              print("Could not find or click join button. Aborting.")
              await browser.close()
              return None, None
@@ -152,6 +189,10 @@ async def main():
     if not MEETING_URL or not OPENAI_API_KEY:
         print("Please set MEETING_URL and OPENAI_API_KEY.")
         return
+
+    # Route bot audio via PulseAudio virtual devices (separate from Chrome defaults)
+    os.environ["PULSE_SOURCE"] = "BrowserOutput.monitor"
+    os.environ["PULSE_SINK"] = "BotOutput"
 
     # 1. Setup Audio
     browser_input_index, bot_output_index = find_audio_devices()
@@ -216,7 +257,7 @@ async def main():
 
     task = PipelineTask(
         pipeline,
-        params=PipelineTask.Params(
+        params=PipelineParams(
             allow_interruptions=ALLOW_INTERRUPTIONS,
             enable_metrics=True
         )
@@ -234,7 +275,16 @@ async def main():
         print("Starting voice agent...")
 
         try:
-            await task.queue_frame(LLMMessagesFrame(messages))
+            await task.queue_frame(LLMMessagesUpdateFrame(messages, run_llm=False))
+            if ANNOUNCE_ON_JOIN:
+                await task.queue_frame(
+                    LLMMessagesUpdateFrame(
+                        [
+                            {"role": "user", "content": "Please introduce yourself briefly to the meeting."}
+                        ],
+                        run_llm=True,
+                    )
+                )
             await runner.run(task)
         except KeyboardInterrupt:
             print("Exiting...")
